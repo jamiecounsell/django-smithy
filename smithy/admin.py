@@ -1,14 +1,17 @@
 ## -*- coding: utf-8 -*-
+from typing import List, Union
+
 from django.contrib import admin, messages
 from django.db import models
+from django.db.models import QuerySet
 from django.forms.widgets import TextInput
 from django.conf import settings
-from smithy.models import RequestBlueprint, RequestRecord, Header, QueryParameter, Cookie, Variable
+from smithy.models import RequestBlueprint, RequestRecord, Header, QueryParameter, Cookie, Variable, BodyParameter
 
 CODEMIRROR_PATH = getattr(settings, 'SMITHY_CODEMIRROR_PATH', "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.44.0/").rstrip('/')
 
 
-def send(modeladmin, request, queryset):
+def send(modeladmin, request, queryset : Union[QuerySet, List[RequestBlueprint]]):
     for obj in queryset:
         obj.send()
     messages.success(request, "Sent {} request{}".format(
@@ -38,16 +41,18 @@ def ObjectInline(m, readonly = False):
 
 
 class RequestAdmin(admin.ModelAdmin):
-    list_display = ['url', 'method', 'created', 'modified']
+    list_display = ['name', 'url', 'method', 'created', 'modified']
     exclude = ['request_ptr', 'id']
     fields = [
         'name',
         'method',
         #'follow_redirects',
         'url',
+        'content_type',
         'body',
     ]
     inlines = [
+        ObjectInline(BodyParameter),
         ObjectInline(Header),
         ObjectInline(QueryParameter),
         ObjectInline(Cookie),
@@ -57,7 +62,7 @@ class RequestAdmin(admin.ModelAdmin):
 
 class RequestBlueprintAdmin(RequestAdmin):
     actions = [
-        send
+        send,
     ]
 
     class Media:
@@ -82,7 +87,7 @@ class RequestRecordAdmin(RequestAdmin):
         ObjectInline(Cookie, True),
     ]
 
-    fields = RequestAdmin.fields + ['response']
+    fields = RequestAdmin.fields + ['raw_request', 'raw_response']
 
     def get_readonly_fields(self, request, obj=None):
         if obj:
@@ -90,6 +95,11 @@ class RequestRecordAdmin(RequestAdmin):
                 field.name for field in obj.__class__._meta.fields
                 if field.name not in self.exclude]
         return self.readonly_fields
+
+    def get_formsets_with_inlines(self, request, obj=None):
+        for inline in self.get_inline_instances(request, obj):
+            if obj is not None and inline.get_queryset(request).count() > 0:
+                yield inline.get_formset(request, obj), inline
 
     class Media:
         css = {

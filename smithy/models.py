@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
 
 from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 from requests import Request as HTTPRequest, Session
 from requests.cookies import create_cookie, RequestsCookieJar
 from urllib.parse import parse_qs, urlparse, urlencode
+from requests_toolbelt.utils import dump
 
 from model_utils.models import TimeStampedModel
 
-from smithy.helpers import render_with_context
+from smithy.helpers import render_with_context, parse_dump_result
 
 
 class NameValueModel(TimeStampedModel):
@@ -34,14 +37,30 @@ class Request(TimeStampedModel):
         ('OPTIONS', 'OPTIONS'),
         ('HEAD', 'HEAD'),
     )
+    BODY_TYPES = (
+        ('', 'Other'),
+        ('application/x-www-form-urlencoded', 'x-www-form-urlencoded'),
+        ('application/json', 'JSON'),
+        ('text/plain', 'Text'),
+        ('application/javascript', 'JavaScript'),
+        ('application/xml', 'XML (application/xml)'),
+        ('text/xml', 'XML (text/xml)'),
+        ('text/html', 'HTML'),
+    )
     method = models.CharField(
         max_length = 7, choices = METHODS,
         blank = False, null = False)
     name = models.CharField(max_length = 500, blank = False)
     url = models.CharField(max_length = 2083)
     body = models.TextField()
+    content_type = models.CharField(
+        default = BODY_TYPES[0][0],
+        blank = True, null = True,
+        max_length = 100, choices = BODY_TYPES)
 
     def __str__(self):
+        if self.name:
+            return self.name
         return "{} {}".format(
             self.method,
             self.url,
@@ -57,17 +76,19 @@ class RequestBlueprint(Request):
     follow_redirects = models.BooleanField(
         default = False, blank = False, null = False)
 
+    @property
+    def name_value_related(self):
+        return [
+            self.headers,
+            self.query_parameters,
+            self.cookies
+        ]
+
     def send(self, context = None):
 
         context = context or {}
         for variable in self.variables.all():
             context[variable.name] = variable.value
-
-        name_value_related = [
-            self.headers,
-            self.query_parameters,
-            self.cookies
-        ]
 
         request = HTTPRequest(
             url = render_with_context(self.url, context),
@@ -77,7 +98,7 @@ class RequestBlueprint(Request):
         record = RequestRecord.objects.create(blueprint = self)
 
         # Copy RequestBlueprint values to RequestRecord
-        for qs in name_value_related:
+        for qs in self.name_value_related:
             for obj in qs.all():
                 obj.pk = 0
                 obj.name = render_with_context(obj.name, context)
@@ -86,19 +107,29 @@ class RequestBlueprint(Request):
                 obj.request = record
                 obj.save()
 
-        request.data = render_with_context(self.body, context)
+        if self.content_type == self.BODY_TYPES[0][0]:
+            data = render_with_context(self.body, context)
+        else:
+            data = {}
+            for param in self.body_parameters.all():
+                param.add_to(data, context)
+
+        request.data = data
         prepared_request = request.prepare()
 
         response = session.send(prepared_request, stream = True)
         # TODO: follow redirects
 
         RequestRecord.objects.filter(pk = record.pk).update(
-            response = response.raw.read(),
+            raw_request = parse_dump_result(dump._dump_request_data, prepared_request),
+            raw_response = parse_dump_result(dump._dump_response_data, response),
+            status = response.status_code,
             **RequestRecord.get_clone_args(self, context)
         )
 
         # Return fresh copy after update
         return RequestRecord.objects.get(pk = record.pk)
+
 
 class RequestRecord(Request):
     """
@@ -106,17 +137,22 @@ class RequestRecord(Request):
     Contains response and diagnostic information
     about the request.
     """
-    response = models.TextField()
+    raw_request = models.TextField()
+    raw_response = models.TextField()
+    status = models.PositiveIntegerField(null = True)
     blueprint = models.ForeignKey(
         'smithy.RequestBlueprint',
         on_delete = models.SET_NULL,
         null = True)
 
+    @property
+    def is_success(self):
+        return self.status and self.status < 400
+
     @staticmethod
     def of_blueprint(blueprint):
         return RequestRecord.objects.filter(
-            blueprint = blueprint
-        )
+            blueprint = blueprint)
 
     @classmethod
     def get_clone_args(cls, obj, context : dict):
@@ -145,6 +181,26 @@ class Variable(NameValueModel):
         'smithy.RequestBlueprint',
         on_delete = models.CASCADE,
         related_name = 'variables')
+
+
+class BodyParameter(NameValueModel):
+    """
+    A x-www-form-urlencoded parameter. Will be properly
+    urlencoded and added to the body when the request is
+    sent.
+    """
+    request = models.ForeignKey(
+        'smithy.RequestBlueprint',
+        on_delete = models.CASCADE,
+        related_name = 'body_parameters')
+
+    def add_to(self, payload : dict, context: dict):
+        if self.name and self.value:
+            payload[
+                render_with_context(self.name, context)
+            ] = render_with_context(self.value, context)
+        else:
+            pass # TODO: warn
 
 
 class Header(NameValueModel):
@@ -206,4 +262,14 @@ class Cookie(NameValueModel):
         request.cookies = request.cookies or RequestsCookieJar()
         request.cookies.set_cookie(
             create_cookie(self.name, self.value)
+        )
+
+
+@receiver(post_save, sender = RequestBlueprint)
+def add_content_type(sender, instance : RequestBlueprint, created, **kwargs):
+    if created and not instance.headers.filter(name__iexact = 'content-type').exists():
+        instance.content_type and Header.objects.create(
+            name = 'Content-Type',
+            value = instance.content_type,
+            request = instance.request_ptr
         )

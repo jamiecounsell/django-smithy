@@ -1,5 +1,6 @@
 .form-row.field-body .readonly,
-.form-row.field-response .readonly,
+.form-row.field-raw_request .readonly,
+.form-row.field-raw_response .readonly,
 .form-row .field-name > p,
 .form-row .field-value > p {
   font-family: monospace;
