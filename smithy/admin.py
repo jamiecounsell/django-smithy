@@ -89,6 +89,9 @@ class RequestRecordAdmin(RequestAdmin):
 
     fields = RequestAdmin.fields + ['raw_request', 'raw_response']
 
+    def has_add_permission(self, request):
+        return False
+
     def get_readonly_fields(self, request, obj=None):
         if obj:
             self.readonly_fields = [
