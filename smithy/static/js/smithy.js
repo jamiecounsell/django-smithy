@@ -70,6 +70,7 @@
     }
 
     function check($el) {
+        $el = $el.target ? $el.target : $el;
         var name = $el.value;
         var id = $el.id;
         var target_id = id.replace(/-name$/, '-value');
@@ -80,12 +81,14 @@
         }
     }
 
-    $(document).on("DOMContentLoaded", function () {
-        document.querySelectorAll("#variables-group .form-row .field-name > input[type='text']").forEach(function (field) {
+    function sensitive_data_hiding() {
+        document.querySelectorAll("#variables-group .field-name > input[type='text']").forEach(function (field) {
             check(field);
-            field.addEventListener('change', function ($e) {
-                check($e.target)
-            });
+            field.removeEventListener('change', check);
+            field.addEventListener('change', check);
         });
-    });
+    }
+
+    $(document).on("DOMContentLoaded", sensitive_data_hiding);
+    $(document).on("formset:added", sensitive_data_hiding);
 })(django.jQuery);
