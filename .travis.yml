@@ -4,8 +4,9 @@ language: python
 
 python:
   - "3.6"
+  - "3.5"
 
-env: 
+env:
   - TOX_ENV=py36-django-111
   - TOX_ENV=py35-django-111
   - TOX_ENV=py34-django-111
