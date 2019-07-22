@@ -15,7 +15,7 @@ from smithy.helpers import render_with_context, parse_dump_result
 
 class NameValueModel(TimeStampedModel):
     name = models.CharField(max_length = 200)
-    value = models.TextField()
+    value = models.TextField(blank = True)
 
     def __str__(self):
         return self.name
