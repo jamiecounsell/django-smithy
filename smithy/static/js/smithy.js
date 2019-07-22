@@ -73,7 +73,7 @@
         var name = $el.value;
         var id = $el.id;
         var target_id = id.replace(/-name$/, '-value');
-        if (/pass|key|secret/.test(name)) {
+        if (/pass|key|secret|token/.test(name)) {
             set_type(target_id, 'password');
         } else {
             set_type(target_id, 'text');
@@ -81,7 +81,7 @@
     }
 
     $(document).on("DOMContentLoaded", function () {
-        document.querySelectorAll("#requestblueprint_form .module .form-row .field-name > input[type='text']").forEach(function (field) {
+        document.querySelectorAll("#variables-group .form-row .field-name > input[type='text']").forEach(function (field) {
             check(field);
             field.addEventListener('change', function ($e) {
                 check($e.target)
