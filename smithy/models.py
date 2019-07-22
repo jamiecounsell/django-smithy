@@ -52,7 +52,7 @@ class Request(TimeStampedModel):
         blank = False, null = False)
     name = models.CharField(max_length = 500, blank = False)
     url = models.CharField(max_length = 2083)
-    body = models.TextField()
+    body = models.TextField(blank = True)
     content_type = models.CharField(
         default = BODY_TYPES[0][0],
         blank = True, null = True,
